@@ -1,0 +1,45 @@
+name: Unpack ToolPilot site
+
+on:
+  push:
+    paths:
+      - 'site.part00'
+      - 'site.part01'
+      - 'site.part02'
+      - 'site.part03'
+      - 'site.part04'
+      - 'site.part05'
+      - '.github/workflows/unpack-site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rebuild and extract website
+        shell: bash
+        run: |
+          cat site.part00 site.part01 site.part02 site.part03 site.part04 site.part05 > /tmp/site.b64
+          base64 -d /tmp/site.b64 > /tmp/site.tar.gz
+          mkdir -p /tmp/toolpilot-site
+          tar -xzf /tmp/site.tar.gz -C /tmp/toolpilot-site
+          rsync -a /tmp/toolpilot-site/ ./
+          touch .nojekyll
+      - name: Commit website files
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          if git diff --cached --quiet; then
+            echo "No site changes to commit."
+          else
+            git commit -m "Deploy ToolPilot 50-tool website"
+            git push
+          fi
