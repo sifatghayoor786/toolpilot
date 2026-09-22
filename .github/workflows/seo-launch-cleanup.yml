@@ -1,0 +1,143 @@
+name: SEO and launch cleanup
+
+on:
+  push:
+    paths:
+      - '.github/workflows/seo-launch-cleanup.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Clean launch copy and fix SEO
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, json, html
+
+          root = Path(".")
+          base = "https://sifatghayoor786.github.io/toolpilot/"
+          html_files = [p for p in root.rglob("*.html") if ".github" not in p.parts]
+
+          for p in html_files:
+              s = p.read_text(encoding="utf-8")
+
+              # Remove visible ad placeholders until real ads are approved/configured.
+              s = re.sub(r'<div class="(?:wrap )?ad-slot">.*?</div>', '', s, flags=re.S)
+
+              # Canonical URL.
+              if p.name == "index.html" and p.parent == root:
+                  canonical = base
+              elif p.parent.name == "tools":
+                  canonical = base + "tools/" + p.name
+              else:
+                  canonical = base + p.name
+
+              canon_tag = f'<link rel="canonical" href="{canonical}">'
+              if re.search(r'<link rel="canonical"[^>]*>', s):
+                  s = re.sub(r'<link rel="canonical"[^>]*>', canon_tag, s, count=1)
+              else:
+                  s = s.replace('</title>', '</title>' + canon_tag, 1)
+
+              # Explicit crawl directive.
+              if 'name="robots"' not in s:
+                  s = s.replace('</title>', '</title><meta name="robots" content="index,follow,max-image-preview:large">', 1)
+
+              # Basic structured data, avoiding duplicates.
+              if 'application/ld+json' not in s:
+                  title_m = re.search(r'<title>(.*?)</title>', s, re.S)
+                  desc_m = re.search(r'<meta name="description" content="([^"]*)">', s)
+                  title = html.unescape(title_m.group(1)).replace(" — ToolPilot","") if title_m else "ToolPilot"
+                  desc = html.unescape(desc_m.group(1)) if desc_m else "Free professional online utility."
+                  if p.parent.name == "tools":
+                      data = {
+                          "@context":"https://schema.org",
+                          "@type":"WebApplication",
+                          "name":title,
+                          "url":canonical,
+                          "description":desc,
+                          "applicationCategory":"UtilitiesApplication",
+                          "operatingSystem":"Any",
+                          "offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}
+                      }
+                  elif p.name == "index.html":
+                      data = {
+                          "@context":"https://schema.org",
+                          "@type":"WebSite",
+                          "name":"ToolPilot",
+                          "url":base,
+                          "description":"Free professional calculators, generators, planners, converters and checkers for work, money and business."
+                      }
+                  else:
+                      data = {
+                          "@context":"https://schema.org",
+                          "@type":"WebPage",
+                          "name":title,
+                          "url":canonical
+                      }
+                  block = '<script type="application/ld+json">' + json.dumps(data, separators=(',',':')) + '</script>'
+                  s = s.replace('</head>', block + '</head>', 1)
+
+              p.write_text(s, encoding="utf-8")
+
+          # Homepage: replace build-stage language with visitor-facing copy.
+          p = root / "index.html"
+          s = p.read_text(encoding="utf-8")
+          s = s.replace(
+              "Every tool in this V1 runs without a paid AI API.",
+              "All tools run instantly in your browser with no signup required."
+          )
+          s = s.replace(
+              "<h2>Built for useful traffic, not thin pages</h2><p>ToolPilot combines real utilities with explanatory content and related-tool navigation. The site can be hosted as static files on a free hosting service. Before monetization, replace the temporary brand/domain details, complete the contact and consent setup, and review each page for quality.</p>",
+              "<h2>Practical tools, clear results</h2><p>ToolPilot combines focused utilities with plain-English explanations and related-tool navigation. Calculations run in your browser, so you can get useful results quickly without creating an account.</p>"
+          )
+          p.write_text(s, encoding="utf-8")
+
+          # Contact page: use the owner's real public project channel instead of a placeholder.
+          p = root / "contact.html"
+          s = p.read_text(encoding="utf-8")
+          s = re.sub(
+              r'<section class="contentbox prose"><p>.*?</p></section>',
+              '<section class="contentbox prose"><p>For feedback, bug reports, formula corrections or tool suggestions, contact ToolPilot through the public GitHub issue tracker.</p><p><a href="https://github.com/sifatghayoor786/toolpilot/issues" rel="noopener">Open ToolPilot support & feedback</a></p><p class="note">Do not include private, financial or sensitive personal information in a public issue.</p></section>',
+              s, count=1, flags=re.S
+          )
+          p.write_text(s, encoding="utf-8")
+
+          # Privacy page: describe current behavior without launch-stage instructions.
+          p = root / "privacy.html"
+          s = p.read_text(encoding="utf-8")
+          s = re.sub(
+              r'<section class="contentbox prose"><p>.*?</p></section>',
+              '<section class="contentbox prose"><p><strong>Last updated: September 22, 2026.</strong></p><p>ToolPilot does not require an account. Values entered into the calculators and generators are processed locally in your browser and are not intentionally sent to ToolPilot for calculation.</p><p>The site is hosted using GitHub Pages, so technical request data may be processed by the hosting provider under its own policies. ToolPilot currently does not run display advertising or a third-party analytics service. If advertising, analytics, cookies or consent-management services are added, this policy will be updated to describe those services before activation.</p><p>Do not enter confidential or sensitive information into tools unless you are comfortable processing it on your own device.</p></section>',
+              s, count=1, flags=re.S
+          )
+          p.write_text(s, encoding="utf-8")
+
+          # Add update dates to terms/disclaimer.
+          for name in ("terms.html","disclaimer.html"):
+              p = root / name
+              s = p.read_text(encoding="utf-8")
+              if "Last updated:" not in s:
+                  s = s.replace('<section class="contentbox prose">','<section class="contentbox prose"><p><strong>Last updated: September 22, 2026.</strong></p>',1)
+              p.write_text(s, encoding="utf-8")
+          PY
+
+      - name: Commit SEO cleanup
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html about.html contact.html privacy.html terms.html disclaimer.html tools/*.html
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Fix canonical URLs and finalize launch copy"
+            git push
+          fi
